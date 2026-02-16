@@ -4,6 +4,8 @@ dotenv.config();
 import mongoose from 'mongoose';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
 import productRoutes from '../routes/productRoutes.js';
 import billRoutes from '../routes/billRoutes.js';
 import authRoutes from '../routes/authRoutes.js';
@@ -11,8 +13,21 @@ import resetRoutes from '../routes/resetRoutes.js';
 
 const app = express();
 
-// CORS & JSON middleware
-app.use(cors({ origin: '*' }));
+// Security and performance middleware
+app.use(helmet());
+app.use(compression());
+app.set('trust proxy', true);
+
+// Configure CORS using ALLOWED_ORIGINS env var (comma-separated), fallback to allow all in development
+const allowed = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+const corsOptions = allowed.length > 0 ? { origin: (origin, cb) => {
+  if (!origin) return cb(null, true); // allow server-to-server or curl
+  if (allowed.includes(origin)) return cb(null, true);
+  cb(new Error('CORS not allowed'));
+}} : { origin: '*' };
+
+// JSON and CORS
+app.use(cors(corsOptions));
 app.use(express.json());
 
 let dbConnected = false;
