@@ -20,13 +20,18 @@ app.use(helmet());
 app.use(compression());
 
 // CORS
-app.use(cors({ origin: '*' }));
+app.use(cors({
+	origin: '*',
+	methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+	allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // JSON
 app.use(express.json());
 
 // Health and root routes
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get('/api', (req, res) => res.send('API working'));
 app.get('/', (req, res) => res.send('Electrical Shop Backend API is running'));
 
 // API routes
