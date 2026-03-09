@@ -6,48 +6,64 @@ import User from '../models/User.js';
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateToken = (id) => jwt.sign({ id }, process.env.JWT_SECRET || 'secret', { expiresIn: '30d' });
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
-export const signup = async (req, res) => {
+export const register = async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { password, name } = req.body;
+    const email = normalizeEmail(req.body.email);
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    const exists = await User.findOne({ email: email.toLowerCase() });
-    if (exists) return res.status(400).json({ error: 'Email already registered' });
+    if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ error: 'Email already exists' });
     
     // Auto-generate username from email (first part before @)
-    const generatedUsername = email.split('@')[0].toLowerCase();
+    const generatedUsername = email.split('@')[0];
     const usernameExists = await User.findOne({ username: generatedUsername });
     const finalUsername = usernameExists ? `${generatedUsername}${Date.now()}` : generatedUsername;
     
-    const user = await User.create({ email: email.toLowerCase(), username: finalUsername, password, name: name || '' });
+    const user = await User.create({ email, username: finalUsername, password, name: name || '', role: 'user' });
     res.status(201).json({
+      message: 'User created successfully',
       _id: user._id,
       email: user.email,
       username: user.username,
       name: user.name,
+      role: user.role,
       token: generateToken(user._id)
     });
   } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(400).json({ error: 'Email already exists' });
+    }
     res.status(500).json({ error: error.message });
   }
 };
 
+export const signup = register;
+
 export const login = async (req, res) => {
   try {
-    const { username, password } = req.body;
-    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-    
-    const user = await User.findOne({ username: username.toLowerCase() });
-    if (!user || !user.password) return res.status(401).json({ error: 'Invalid username or password' });
+    const { email, username, password } = req.body;
+    const emailNorm = normalizeEmail(email);
+    const usernameNorm = String(username || '').trim().toLowerCase();
+    if ((!emailNorm && !usernameNorm) || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    const query = emailNorm ? { email: emailNorm } : { username: usernameNorm };
+    const user = await User.findOne(query);
+    if (!user || !user.password) return res.status(401).json({ error: 'Invalid email or password' });
     
     const match = await user.matchPassword(password);
-    if (!match) return res.status(401).json({ error: 'Invalid username or password' });
+    if (!match) return res.status(401).json({ error: 'Invalid email or password' });
     
     res.json({
       _id: user._id,
       email: user.email,
       username: user.username,
       name: user.name,
+      role: user.role,
       token: generateToken(user._id)
     });
   } catch (error) {
@@ -78,7 +94,8 @@ export const googleAuth = async (req, res) => {
         email,
         name: payload.name || '',
         googleId: payload.sub,
-        password: crypto.randomBytes(16).toString('hex')
+        password: crypto.randomBytes(16).toString('hex'),
+        role: 'user'
       });
     } else if (!user.googleId) {
       user.googleId = payload.sub;
@@ -87,7 +104,9 @@ export const googleAuth = async (req, res) => {
     res.json({
       _id: user._id,
       email: user.email,
+      username: user.username,
       name: user.name,
+      role: user.role,
       token: generateToken(user._id)
     });
   } catch (error) {

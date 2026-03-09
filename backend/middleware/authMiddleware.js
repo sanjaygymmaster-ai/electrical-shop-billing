@@ -11,9 +11,21 @@ export const protect = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
     const user = await User.findById(decoded.id).select('-password');
     if (!user) return res.status(401).json({ error: 'User not found' });
-    req.user = user;
+    req.user = {
+      ...user.toObject(),
+      id: String(user._id),
+      _id: String(user._id)
+    };
     next();
   } catch {
     res.status(401).json({ error: 'Not authorized' });
   }
+};
+
+export const adminOnly = (req, res, next) => {
+  const role = String(req?.user?.role || '').toLowerCase();
+  if (role !== 'admin') {
+    return res.status(403).json({ error: 'Access Denied' });
+  }
+  next();
 };

@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getBillById, updateBill, markBillPaid } from '../api';
 import UPIQR from '../components/UPIQR';
+import { useAuth } from '../context/AuthContext';
 
 export default function BillDetail({ onRefresh }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [bill, setBill] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -15,9 +17,17 @@ export default function BillDetail({ onRefresh }) {
   const [gstEnabled, setGstEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState(null);
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('cash');
+  const userDisplayName = (user?.name || user?.username || user?.email?.split('@')[0] || 'User')
+    .toString()
+    .trim()
+    .toUpperCase();
+  const shopDisplayName = userDisplayName.includes('ELECTRICAL SHOP')
+    ? userDisplayName
+    : `${userDisplayName} ELECTRICAL SHOP`;
 
   useEffect(() => {
     loadBill();
@@ -41,6 +51,51 @@ export default function BillDetail({ onRefresh }) {
           price: Number(i.price || 0)
         }))
       );
+
+      const pendingEditBillId = localStorage.getItem('pending-edit-bill-id');
+      const rawCart = localStorage.getItem('billItems');
+      if (String(b.paymentStatus || '').toLowerCase() === 'pending' && pendingEditBillId === String(b._id) && rawCart) {
+        const cartItems = JSON.parse(rawCart || '[]');
+        if (Array.isArray(cartItems) && cartItems.length) {
+          const currentItems = (b.items || []).map(i => ({
+            ...i,
+            _id: i.productId,
+            id: i.productId,
+            qty: i.qty || 1,
+            price: Number(i.price || 0)
+          }));
+
+          const mergedMap = new Map();
+          currentItems.forEach((it) => {
+            const key = String(it._id || it.id || it.name || '');
+            mergedMap.set(key, { ...it, qty: Number(it.qty || 1), price: Number(it.price || 0) });
+          });
+
+          cartItems.forEach((it) => {
+            const key = String(it._id || it.id || it.name || '');
+            const existing = mergedMap.get(key);
+            if (existing) {
+              mergedMap.set(key, { ...existing, qty: Number(existing.qty || 1) + Number(it.quantity || 1) });
+            } else {
+              mergedMap.set(key, {
+                _id: it._id || it.id,
+                id: it._id || it.id,
+                name: it.name || 'Item',
+                brand: it.brand || '',
+                price: Number(it.price || 0),
+                qty: Number(it.quantity || 1)
+              });
+            }
+          });
+
+          setItems(Array.from(mergedMap.values()));
+          setEditing(true);
+          setNotice({ type: 'success', message: 'Items added from Home. Click Save Changes to update this pending bill.' });
+          localStorage.removeItem('pending-edit-bill-id');
+          localStorage.removeItem('billItems');
+          window.dispatchEvent(new Event('bill-items-reset'));
+        }
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -51,10 +106,6 @@ export default function BillDetail({ onRefresh }) {
   const subtotal = items.reduce((s, i) => s + (Number(i.price) || 0) * (Number(i.qty) || 1), 0);
   const gst = gstEnabled ? +(subtotal * 0.18).toFixed(2) : 0;
   const grandTotal = +(subtotal + gst).toFixed(2);
-
-  function addItemRow() {
-    setItems(prev => [...prev, { name: '', price: 0, qty: 1 }]);
-  }
 
   function updateItem(idx, field, value) {
     setItems(prev => prev.map((it, i) => (i === idx ? { ...it, [field]: value } : it)));
@@ -84,12 +135,12 @@ export default function BillDetail({ onRefresh }) {
     if (!bill || bill.paymentStatus !== 'pending') return;
 
     if (!customerName.trim()) {
-      alert('Please enter customer name');
+      setNotice({ type: 'error', message: 'Please enter customer name' });
       return;
     }
 
     if (!items.length) {
-      alert('Please keep at least one item in bill');
+      setNotice({ type: 'error', message: 'Please keep at least one item in bill' });
       return;
     }
 
@@ -114,9 +165,10 @@ export default function BillDetail({ onRefresh }) {
       setEditing(false);
       await loadBill();
       onRefresh?.();
+      setNotice({ type: 'success', message: 'Bill updated successfully' });
     } catch (e) {
       console.error(e);
-      alert('Failed to save bill changes');
+      setNotice({ type: 'error', message: 'Failed to save bill changes' });
     } finally {
       setSaving(false);
     }
@@ -125,6 +177,14 @@ export default function BillDetail({ onRefresh }) {
   function handleMarkPaid() {
     setSelectedPaymentMethod('cash');
     setShowPaymentModal(true);
+  }
+
+  function handleAddItemFromHome() {
+    if (!bill?._id) return;
+    localStorage.setItem('pending-edit-bill-id', String(bill._id));
+    localStorage.removeItem('billItems');
+    window.dispatchEvent(new Event('bill-items-reset'));
+    navigate('/dashboard');
   }
 
   async function handlePayment(method) {
@@ -136,10 +196,18 @@ export default function BillDetail({ onRefresh }) {
       setShowPaymentModal(false);
       await loadBill();
       onRefresh?.();
-      alert(`Payment successful via ${method}`);
+      setNotice({ type: 'success', message: `Payment successful via ${method}` });
     } catch (e) {
       console.error(e);
-      alert('Payment failed. Please try again.');
+      const msg = e?.response?.data?.error || e?.response?.data?.message || e?.message || 'Payment failed';
+      if (String(msg).toLowerCase().includes('already paid')) {
+        setShowPaymentModal(false);
+        await loadBill();
+        onRefresh?.();
+        setNotice({ type: 'success', message: 'Bill already marked as paid' });
+      } else {
+        setNotice({ type: 'error', message: `Payment failed: ${msg}` });
+      }
     } finally {
       setSaving(false);
     }
@@ -156,7 +224,7 @@ export default function BillDetail({ onRefresh }) {
         th,td{border:1px solid #333;padding:4px;text-align:left;}
       </style></head>
       <body>
-      <h1>ELECTRICAL SHOP BILL</h1>
+      <h1>${shopDisplayName} BILL</h1>
       <p><strong>Bill Number:</strong> ${bill.billNumber || ''}</p>
       <p><strong>Date:</strong> ${new Date(bill.createdAt).toLocaleString()}</p>
       <p><strong>Customer:</strong> ${bill.customerName || ''}</p>
@@ -190,8 +258,15 @@ export default function BillDetail({ onRefresh }) {
 
   return (
     <div>
+      {notice ? (
+        <div className="mb-4">
+          <div className={`${notice.type === 'error' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'} border px-3 py-2 rounded-lg text-sm`}>
+            {notice.message}
+          </div>
+        </div>
+      ) : null}
       <div className="flex items-center justify-between mb-4">
-        <button onClick={() => navigate('/bills')} className="text-[#0D47A1] font-medium">Back</button>
+        <button onClick={() => navigate('/daily-report')} className="text-[#0D47A1] font-medium">Back</button>
         <span className="font-semibold">Bill #{bill.billNumber}</span>
         <button onClick={printBill} className="bg-gray-600 text-white px-3 py-2 rounded-lg hover:bg-gray-700 font-medium">
           Print
@@ -217,8 +292,11 @@ export default function BillDetail({ onRefresh }) {
           <h3 className="font-semibold mb-3">Items ({items.length})</h3>
 
           {editing && bill.paymentStatus === 'pending' && (
-            <button className="bg-[#FFC107] text-slate-900 py-2 px-4 rounded-lg font-semibold mb-3" onClick={addItemRow}>
-              + Add Item Row
+            <button
+              className="bg-[#FFC107] text-slate-900 py-2 px-4 rounded-lg font-semibold mb-3"
+              onClick={handleAddItemFromHome}
+            >
+              + Add Item From Home
             </button>
           )}
 

@@ -1,11 +1,12 @@
-let products = [
-  { _id: '1', name: 'LED Bulb 9W', brand: 'Philips', price: 120, stock: 50, category: 'Lighting' },
-  { _id: '2', name: 'Ceiling Fan', brand: 'Havells', price: 1800, stock: 20, category: 'Fans' },
-  { _id: '3', name: 'Switch Board', brand: 'Anchor', price: 250, stock: 35, category: 'Switches' }
-];
+import Product from '../models/Product.js';
+
+const getUserId = (req) => req?.user?.id || req?.user?._id;
 
 export const getProducts = async (req, res) => {
   try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authorized' });
+    const products = await Product.find({ userId }).sort({ createdAt: -1 });
     res.json(products);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -14,16 +15,24 @@ export const getProducts = async (req, res) => {
 
 export const addProduct = async (req, res) => {
   try {
-    const { name, brand, price, stock, category } = req.body;
-    const newProduct = {
-      _id: Date.now().toString(),
-      name,
-      brand,
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authorized' });
+
+    const { name, brand, price, stock, category, image } = req.body;
+    if (!name || price === undefined) {
+      return res.status(400).json({ error: 'Name and price are required' });
+    }
+
+    const newProduct = await Product.create({
+      userId,
+      name: String(name).trim(),
+      brand: brand ? String(brand).trim() : '',
       price: Number(price),
       stock: Number(stock || 0),
-      category: category || 'General'
-    };
-    products.push(newProduct);
+      category: category ? String(category).trim() : 'General',
+      image: image ? String(image).trim() : ''
+    });
+
     res.status(201).json(newProduct);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -32,9 +41,21 @@ export const addProduct = async (req, res) => {
 
 export const updateProduct = async (req, res) => {
   try {
-    const product = products.find(p => p._id === req.params.id);
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authorized' });
+
+    const product = await Product.findOne({ _id: req.params.id, userId });
     if (!product) return res.status(404).json({ error: 'Product not found' });
-    Object.assign(product, req.body);
+
+    const { name, brand, price, stock, category, image } = req.body;
+    if (name !== undefined) product.name = String(name).trim();
+    if (brand !== undefined) product.brand = String(brand).trim();
+    if (price !== undefined) product.price = Number(price);
+    if (stock !== undefined) product.stock = Number(stock);
+    if (category !== undefined) product.category = String(category).trim();
+    if (image !== undefined) product.image = String(image).trim();
+
+    await product.save();
     res.json(product);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -43,11 +64,15 @@ export const updateProduct = async (req, res) => {
 
 export const deleteProduct = async (req, res) => {
   try {
-    const index = products.findIndex(p => p._id === req.params.id);
-    if (index === -1) return res.status(404).json({ error: 'Product not found' });
-    products.splice(index, 1);
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authorized' });
+
+    const deleted = await Product.findOneAndDelete({ _id: req.params.id, userId });
+    if (!deleted) return res.status(404).json({ error: 'Product not found' });
+
     res.json({ message: 'Product deleted' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+

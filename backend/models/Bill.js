@@ -11,7 +11,7 @@ const itemSchema = new mongoose.Schema({
 }, { _id: false });
 
 const billSchema = new mongoose.Schema({
-  userId: { type: String, default: 'admin' },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   billNumber: { type: String, required: true },
   customerName: { type: String, required: true },
   phone: { type: String, default: '' },
@@ -20,6 +20,7 @@ const billSchema = new mongoose.Schema({
   gst: { type: Number, default: 0 },
   grandTotal: { type: Number, required: true },
   paymentStatus: { type: String, enum: ['paid', 'pending'], default: 'paid' },
+  paidAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 

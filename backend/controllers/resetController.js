@@ -1,20 +1,36 @@
 import Product from '../models/Product.js';
 import Bill from '../models/Bill.js';
-
-const SAMPLE_PRODUCTS = [
-  { name: 'LED Bulb 9W', brand: 'Philips', price: 120, stock: 50, category: 'Lighting', image: '' },
-  { name: 'Ceiling Fan', brand: 'Havells', price: 1800, stock: 20, category: 'Fans', image: '' },
-  { name: 'Switch Board', brand: 'Anchor', price: 250, stock: 35, category: 'Switches', image: '' },
-  { name: 'Wire 1.5mm', brand: 'Polycab', price: 45, stock: 4, category: 'Wires', image: '' }
-];
+import Report from '../models/Report.js';
+import User from '../models/User.js';
+import bcrypt from 'bcryptjs';
 
 export const resetData = async (req, res) => {
   try {
     const userId = req.user._id;
+    const { username, password } = req.body || {};
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+
+    const dbUser = await User.findById(userId);
+    if (!dbUser) return res.status(401).json({ error: 'User not found' });
+
+    const givenUsername = String(username).trim().toLowerCase();
+    const actualUsername = String(dbUser.username || '').trim().toLowerCase();
+    if (!actualUsername || givenUsername !== actualUsername) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(String(password), String(dbUser.password || ''));
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
     await Product.deleteMany({ userId });
     await Bill.deleteMany({ userId });
-    await Product.insertMany(SAMPLE_PRODUCTS.map(p => ({ ...p, userId, totalSold: 0 })));
-    res.json({ message: 'All data reset' });
+    await Report.deleteMany({ userId });
+    res.json({ message: 'All user data cleared' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

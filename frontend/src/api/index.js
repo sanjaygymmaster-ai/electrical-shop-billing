@@ -1,18 +1,40 @@
 import axios from 'axios';
 
+const DEFAULT_API_BASE_URL = 'https://electrical-shop-backend.onrender.com/api';
+
+function resolveApiBaseUrl() {
+  const envUrl = (import.meta.env.VITE_API_URL || '').trim();
+  const baseUrl = envUrl || DEFAULT_API_BASE_URL;
+  return baseUrl.replace(/\/+$/, '');
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
+export const API_ORIGIN = API_BASE_URL.replace(/\/api$/, '');
+
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' }
 });
 
-// Add token to requests if available
-// API.interceptors.request.use((config) => {
-//   const user = JSON.parse(localStorage.getItem('shri-ganesh-user') || 'null');
-//   if (user?.token) {
-//     config.headers.Authorization = `Bearer ${user.token}`;
-//   }
-//   return config;
-// });
+// Add token to requests if available (needed for protected backend routes)
+API.interceptors.request.use((config) => {
+  const user = JSON.parse(localStorage.getItem('shri-ganesh-user') || 'null');
+  const token = localStorage.getItem('token') || user?.token;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+API.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (!error.response) {
+      error.message = `Network Error: cannot reach backend (${API.defaults.baseURL}). Check VITE_API_URL and backend availability.`;
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const getProducts = () => API.get('/products');
 export const addProduct = (data) => API.post('/products', data);
@@ -31,7 +53,9 @@ export const finalizeSavedMonthlyReport = (id) => API.post(`/bills/monthly/saved
 export const createBill = (data) => API.post('/bills', data);
 export const updateBill = (id, data) => API.put(`/bills/${id}`, data);
 export const markBillPaid = (id) => API.patch(`/bills/${id}/paid`);
+export const deleteBill = (id) => API.delete(`/bills/${id}`);
+export const getAdminUsers = () => API.get('/admin/users');
 
-export const resetData = () => API.post('/reset');
+export const resetData = (credentials) => API.post('/reset', credentials);
 
 export default API;

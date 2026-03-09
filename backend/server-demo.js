@@ -27,7 +27,16 @@ const SAMPLE_PRODUCTS = [
 ];
 
 // Seed a demo user + sample products + sample bills for local demo server
-const demoUser = { _id: 'u-demo', email: 'demo@demo.com', name: 'Demo User', password: bcrypt.hashSync('demo123', 10) };
+const adminUser = {
+  _id: 'u-admin',
+  email: String(process.env.ADMIN_EMAIL || 'admin@gmail.com').toLowerCase(),
+  username: String(process.env.ADMIN_USERNAME || 'admin').toLowerCase(),
+  name: 'Administrator',
+  role: 'admin',
+  password: bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin123', 10)
+};
+const demoUser = { _id: 'u-demo', email: 'demo@demo.com', username: 'demo', name: 'Demo User', role: 'user', password: bcrypt.hashSync('demo123', 10) };
+users.push(adminUser);
 users.push(demoUser);
 SAMPLE_PRODUCTS.forEach((p) => {
   products.unshift({ _id: String(productIdCounter++), userId: demoUser._id, ...p, totalSold: 0 });
@@ -58,22 +67,41 @@ const protect = (req, res, next) => {
   }
 };
 
+const adminOnly = (req, res, next) => {
+  if (String(req.user?.role || '').toLowerCase() !== 'admin') {
+    return res.status(403).json({ error: 'Access Denied' });
+  }
+  next();
+};
+
+const getUserId = (req) => req.user?._id || demoUser._id;
+const normalizeBillKey = (value) => String(value || '').trim();
+const findBillIndex = (uid, rawKey) => {
+  const key = normalizeBillKey(rawKey);
+  if (!key) return -1;
+  return bills.findIndex(b => b.userId === uid && (b._id === key || b.billNumber === key));
+};
+
 // In-memory saved reports for demo server
 let savedReports = [];
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
-app.post('/api/auth/signup', async (req, res) => {
+app.post(['/api/auth/signup', '/api/auth/register'], async (req, res) => {
   try {
-    const { email, password, name } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    const existing = users.find(u => u.email === email.toLowerCase());
-    if (existing) return res.status(400).json({ error: 'Email already registered' });
+    const { email, username, password, name } = req.body;
+    const emailNorm = String(email || '').trim().toLowerCase();
+    const usernameNorm = String(username || '').trim().toLowerCase();
+    if (!emailNorm || !usernameNorm || !password) return res.status(400).json({ error: 'Email, username and password required' });
+    const existing = users.find(u => u.email === emailNorm);
+    if (existing) return res.status(400).json({ error: 'Email already exists' });
+    const existingUsername = users.find(u => String(u.username || '').toLowerCase() === usernameNorm);
+    if (existingUsername) return res.status(400).json({ error: 'Username already exists' });
     const hashed = await bcrypt.hash(password, 10);
-    const user = { _id: 'u' + Date.now(), email: email.toLowerCase(), name: name || '', password: hashed };
+    const user = { _id: 'u' + Date.now(), email: emailNorm, username: usernameNorm, name: name || '', role: 'user', password: hashed };
     users.push(user);
     const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '30d' });
-    res.status(201).json({ _id: user._id, email: user.email, name: user.name, token });
+    res.status(201).json({ _id: user._id, email: user.email, username: user.username, name: user.name, role: user.role, token });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -81,14 +109,15 @@ app.post('/api/auth/signup', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    const user = users.find(u => u.email === email.toLowerCase());
-    if (!user || !user.password) return res.status(401).json({ error: 'Invalid email or password' });
+    const { username, password } = req.body;
+    const usernameNorm = String(username || '').trim().toLowerCase();
+    if (!usernameNorm || !password) return res.status(400).json({ error: 'Username and password required' });
+    const user = users.find(u => String(u.username || '').toLowerCase() === usernameNorm);
+    if (!user || !user.password) return res.status(401).json({ error: 'Invalid username or password' });
     const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ error: 'Invalid email or password' });
+    if (!match) return res.status(401).json({ error: 'Invalid username or password' });
     const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ _id: user._id, email: user.email, name: user.name, token });
+    res.json({ _id: user._id, email: user.email, username: user.username, name: user.name, role: user.role || 'user', token });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -116,14 +145,27 @@ app.post('/api/auth/google', async (req, res) => {
     } else return res.status(400).json({ error: 'Google token required' });
     let user = users.find(u => u.email === email || u.googleId === sub);
     if (!user) {
-      user = { _id: 'u' + Date.now(), email, name, googleId: sub };
+      user = { _id: 'u' + Date.now(), email, name, googleId: sub, role: 'user' };
       users.push(user);
     }
     const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ _id: user._id, email: user.email, name: user.name, token });
+    res.json({ _id: user._id, email: user.email, username: user.username, name: user.name, role: user.role || 'user', token });
   } catch (e) {
     res.status(401).json({ error: e.message || 'Google sign-in failed' });
   }
+});
+
+app.get('/api/admin/users', protect, adminOnly, (req, res) => {
+  const list = users
+    .map((u) => ({
+      _id: u._id,
+      name: u.name || '',
+      email: u.email || '',
+      username: u.username || '',
+      role: u.role || 'user'
+    }))
+    .sort((a, b) => a.email.localeCompare(b.email));
+  res.json(list);
 });
 
 app.post('/api/auth/forgot-password', (req, res) => {
@@ -182,19 +224,30 @@ app.patch('/api/products/:id/stock', protect, (req, res) => {
 });
 
 app.get('/api/bills', protect, (req, res) => {
-  res.json(bills.filter(b => b.userId === req.user._id));
+  const uid = getUserId(req);
+  res.json(bills.filter(b => b.userId === uid));
 });
 
 // Monthly report (includes daily breakdown)
 app.get('/api/bills/monthly', protect, (req, res) => {
+  const uid = getUserId(req);
   const m = Number(req.query.month) || (new Date().getMonth() + 1);
   const y = Number(req.query.year) || new Date().getFullYear();
   const start = new Date(y, m - 1, 1);
   const end = new Date(y, m, 1);
-  const list = bills.filter(b => b.userId === req.user._id && new Date(b.createdAt) >= start && new Date(b.createdAt) < end && b.paymentStatus === 'paid');
+  const list = bills.filter(b => {
+    if (b.userId !== uid || b.paymentStatus !== 'paid') return false;
+    const paidDate = new Date(b.paidAt || b.createdAt);
+    return paidDate >= start && paidDate < end;
+  });
+  const monthPendingBills = bills.filter(b => {
+    if (b.userId !== uid || b.paymentStatus !== 'pending') return false;
+    const created = new Date(b.createdAt);
+    return created >= start && created < end;
+  }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const totalRevenue = list.reduce((s, b) => s + (b.grandTotal || 0), 0);
   const totalBills = list.length;
-  const items = list.flatMap(b => (b.items || []).map(i => ({ productId: i.productId || null, name: i.name || 'Unknown', qty: i.qty || 0, revenue: i.total || ((i.price || 0) * (i.qty || 0)), createdAt: b.createdAt })));
+  const items = list.flatMap(b => (b.items || []).map(i => ({ productId: i.productId || null, name: i.name || 'Unknown', qty: i.qty || 0, revenue: i.total || ((i.price || 0) * (i.qty || 0)), createdAt: (b.paidAt || b.createdAt) })));
   const grouped = items.reduce((acc, it) => {
     const key = it.productId || it.name;
     if (!acc[key]) acc[key] = { productId: it.productId, name: it.name, qtySold: 0, revenue: 0 };
@@ -206,29 +259,37 @@ app.get('/api/bills/monthly', protect, (req, res) => {
   const days = new Date(y, m, 0).getDate();
   const daily = Array.from({ length: days }, (_, i) => ({ day: i + 1, totalRevenue: 0, totalBills: 0 }));
   for (const b of list) {
-    const d = new Date(b.createdAt).getDate();
+    const d = new Date(b.paidAt || b.createdAt).getDate();
     daily[d - 1].totalRevenue += (b.grandTotal || 0);
     daily[d - 1].totalBills += 1;
   }
   const recentBills = (list || [])
     .slice()
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .sort((a, b) => new Date(b.paidAt || b.createdAt) - new Date(a.paidAt || a.createdAt))
     .slice(0, 8)
-    .map(b => ({ billId: b._id, billNumber: b.billNumber, customerName: b.customerName || '', createdAt: b.createdAt, grandTotal: b.grandTotal, paymentStatus: b.paymentStatus }));
-  res.json({ month: m, year: y, totalRevenue, totalBills, products, daily, recentBills });
+    .map(b => ({ billId: b._id, billNumber: b.billNumber, customerName: b.customerName || '', createdAt: (b.paidAt || b.createdAt), grandTotal: b.grandTotal, paymentStatus: b.paymentStatus }));
+  const overdueCutoff = new Date(Date.now() - (5 * 24 * 60 * 60 * 1000));
+  const overduePendingCount = monthPendingBills.filter(b => new Date(b.createdAt) <= overdueCutoff).length;
+  const pendingBills = monthPendingBills.map(b => ({ billId: b._id, billNumber: b.billNumber, customerName: b.customerName || '', createdAt: b.createdAt, grandTotal: b.grandTotal, paymentStatus: b.paymentStatus }));
+  res.json({ month: m, year: y, totalRevenue, totalBills, products, daily, recentBills, pendingBills, overduePendingCount });
 });
 
 // Save monthly report (demo in-memory)
 app.post('/api/bills/monthly/save', protect, (req, res) => {
+  const uid = getUserId(req);
   const { month, year, finalize } = req.body;
   const m = Number(month) || (new Date().getMonth() + 1);
   const y = Number(year) || new Date().getFullYear();
   const start = new Date(y, m - 1, 1);
   const end = new Date(y, m, 1);
-  const list = bills.filter(b => b.userId === req.user._id && new Date(b.createdAt) >= start && new Date(b.createdAt) < end && b.paymentStatus === 'paid');
+  const list = bills.filter(b => {
+    if (b.userId !== uid || b.paymentStatus !== 'paid') return false;
+    const paidDate = new Date(b.paidAt || b.createdAt);
+    return paidDate >= start && paidDate < end;
+  });
   const totalRevenue = list.reduce((s, b) => s + (b.grandTotal || 0), 0);
   const totalBills = list.length;
-  const items = list.flatMap(b => (b.items || []).map(i => ({ productId: i.productId || null, name: i.name || 'Unknown', qty: i.qty || 0, revenue: i.total || ((i.price || 0) * (i.qty || 0)), createdAt: b.createdAt })));
+  const items = list.flatMap(b => (b.items || []).map(i => ({ productId: i.productId || null, name: i.name || 'Unknown', qty: i.qty || 0, revenue: i.total || ((i.price || 0) * (i.qty || 0)), createdAt: (b.paidAt || b.createdAt) })));
   const grouped = items.reduce((acc, it) => {
     const key = it.productId || it.name;
     if (!acc[key]) acc[key] = { productId: it.productId, name: it.name, qtySold: 0, revenue: 0 };
@@ -240,32 +301,35 @@ app.post('/api/bills/monthly/save', protect, (req, res) => {
   const days = new Date(y, m, 0).getDate();
   const daily = Array.from({ length: days }, (_, i) => ({ day: i + 1, totalRevenue: 0, totalBills: 0 }));
   for (const b of list) {
-    const d = new Date(b.createdAt).getDate();
+    const d = new Date(b.paidAt || b.createdAt).getDate();
     daily[d - 1].totalRevenue += (b.grandTotal || 0);
     daily[d - 1].totalBills += 1;
   }
   const recentBills = (list || [])
     .slice()
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .sort((a, b) => new Date(b.paidAt || b.createdAt) - new Date(a.paidAt || a.createdAt))
     .slice(0, 8)
-    .map(b => ({ billId: b._id, billNumber: b.billNumber, customerName: b.customerName || '', createdAt: b.createdAt, grandTotal: b.grandTotal, paymentStatus: b.paymentStatus }));
-  const report = { id: 'r' + Date.now(), userId: req.user._id, month: m, year: y, totalRevenue, totalBills, products, daily, recentBills, finalized: !!finalize, finalizedAt: finalize ? new Date() : undefined, createdAt: new Date() };
+    .map(b => ({ billId: b._id, billNumber: b.billNumber, customerName: b.customerName || '', createdAt: (b.paidAt || b.createdAt), grandTotal: b.grandTotal, paymentStatus: b.paymentStatus }));
+  const report = { id: 'r' + Date.now(), userId: uid, month: m, year: y, totalRevenue, totalBills, products, daily, recentBills, finalized: !!finalize, finalizedAt: finalize ? new Date() : undefined, createdAt: new Date() };
   savedReports.unshift(report);
   res.status(201).json(report);
 });
 
 app.get('/api/bills/monthly/saved', protect, (req, res) => {
-  res.json(savedReports.filter(r => r.userId === req.user._id));
+  const uid = getUserId(req);
+  res.json(savedReports.filter(r => r.userId === uid));
 });
 
 app.get('/api/bills/monthly/saved/:id', protect, (req, res) => {
-  const r = savedReports.find(x => x.id === req.params.id && x.userId === req.user._id);
+  const uid = getUserId(req);
+  const r = savedReports.find(x => x.id === req.params.id && x.userId === uid);
   if (!r) return res.status(404).json({ error: 'Not found' });
   res.json(r);
 });
 
 app.post('/api/bills/monthly/saved/:id/finalize', protect, (req, res) => {
-  const r = savedReports.find(x => (x.id === req.params.id || x._id === req.params.id) && x.userId === req.user._id);
+  const uid = getUserId(req);
+  const r = savedReports.find(x => (x.id === req.params.id || x._id === req.params.id) && x.userId === uid);
   if (!r) return res.status(404).json({ error: 'Not found' });
   if (r.finalized) return res.status(400).json({ error: 'Already finalized' });
   r.finalized = true;
@@ -274,25 +338,46 @@ app.post('/api/bills/monthly/saved/:id/finalize', protect, (req, res) => {
 });
 
 app.get('/api/bills/daily', protect, (req, res) => {
-  const today = new Date().toDateString();
-  const list = bills.filter(b => b.userId === req.user._id && new Date(b.createdAt).toDateString() === today);
-  const total = list.reduce((s, b) => s + b.grandTotal, 0);
-  res.json({ count: list.length, total, bills: list });
+  const uid = getUserId(req);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const paidBills = bills.filter(b => {
+    if (b.userId !== uid || b.paymentStatus !== 'paid') return false;
+    const paidDate = new Date(b.paidAt || b.createdAt);
+    return paidDate >= today;
+  });
+  const pendingBills = bills
+    .filter(b => b.userId === uid && b.paymentStatus === 'pending')
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const totalRevenue = paidBills.reduce((s, b) => s + (b.grandTotal || 0), 0);
+  const recentBills = paidBills
+    .slice()
+    .sort((a, b) => new Date(b.paidAt || b.createdAt) - new Date(a.paidAt || a.createdAt))
+    .slice(0, 10)
+    .map(b => ({ billId: b._id, billNumber: b.billNumber, customerName: b.customerName || '', createdAt: (b.paidAt || b.createdAt), grandTotal: b.grandTotal, paymentStatus: b.paymentStatus }));
+  const pendingRecent = pendingBills.slice(0, 20).map(b => ({ billId: b._id, billNumber: b.billNumber, customerName: b.customerName || '', createdAt: b.createdAt, grandTotal: b.grandTotal, paymentStatus: b.paymentStatus }));
+  const overdueCutoff = new Date(Date.now() - (5 * 24 * 60 * 60 * 1000));
+  const overduePendingCount = pendingBills.filter(b => new Date(b.createdAt) <= overdueCutoff).length;
+  res.json({ totalRevenue, totalBills: paidBills.length, recentBills, pendingBills: pendingRecent, overduePendingCount, count: paidBills.length, paidBills });
 });
 
 app.get('/api/bills/:id', protect, (req, res) => {
-  const bill = bills.find(b => b._id === req.params.id && b.userId === req.user._id);
+  const uid = getUserId(req);
+  const i = findBillIndex(uid, req.params.id);
+  const bill = i >= 0 ? bills[i] : null;
   if (!bill) return res.status(404).json({ error: 'Not found' });
   res.json(bill);
 });
 
 app.post('/api/bills', protect, (req, res) => {
+  const uid = getUserId(req);
   const { customerName, phone, items, totalAmount, gst, grandTotal } = req.body;
-  const paymentStatus = req.body.paymentStatus === 'pending' ? 'pending' : 'paid';
-  const userBills = bills.filter(b => b.userId === req.user._id);
+  const normalized = String(req.body.paymentStatus || '').trim().toLowerCase();
+  const paymentStatus = normalized === 'pending' ? 'pending' : 'paid';
+  const userBills = bills.filter(b => b.userId === uid);
   const lastNum = userBills.length ? Math.max(...userBills.map(b => parseInt(b.billNumber.replace('B', ''), 10))) : 1000;
   const billNumber = 'B' + (lastNum + 1);
-  const bill = { _id: 'b' + Date.now(), userId: req.user._id, billNumber, customerName, phone: phone || '', items: items || [], totalAmount: Number(totalAmount), gst: Number(gst || 0), grandTotal: Number(grandTotal), paymentStatus, createdAt: new Date() };
+  const bill = { _id: 'b' + Date.now(), userId: uid, billNumber, customerName, phone: phone || '', items: items || [], totalAmount: Number(totalAmount), gst: Number(gst || 0), grandTotal: Number(grandTotal), paymentStatus, paidAt: paymentStatus === 'paid' ? new Date() : null, createdAt: new Date() };
   if (paymentStatus !== 'pending') {
     for (const it of bill.items) {
       const p = products.find(x => x._id === it.productId);
@@ -308,7 +393,8 @@ app.post('/api/bills', protect, (req, res) => {
 });
 
 app.put('/api/bills/:id', protect, (req, res) => {
-  const i = bills.findIndex(b => b._id === req.params.id && b.userId === req.user._id);
+  const uid = getUserId(req);
+  const i = findBillIndex(uid, req.params.id);
   if (i < 0) return res.status(404).json({ error: 'Not found' });
   if (bills[i].paymentStatus !== 'pending') return res.status(400).json({ error: 'Only Pay Later bills editable' });
   const { customerName, phone, items, totalAmount, gst, grandTotal } = req.body;
@@ -322,7 +408,8 @@ app.put('/api/bills/:id', protect, (req, res) => {
 });
 
 app.patch('/api/bills/:id/paid', protect, (req, res) => {
-  const i = bills.findIndex(b => b._id === req.params.id && b.userId === req.user._id);
+  const uid = getUserId(req);
+  const i = findBillIndex(uid, req.params.id);
   if (i < 0) return res.status(404).json({ error: 'Not found' });
   if (bills[i].paymentStatus === 'paid') return res.status(400).json({ error: 'Already paid' });
   for (const it of bills[i].items) {
@@ -334,11 +421,20 @@ app.patch('/api/bills/:id/paid', protect, (req, res) => {
     }
   }
   bills[i].paymentStatus = 'paid';
+  bills[i].paidAt = new Date();
   res.json(bills[i]);
 });
 
+app.delete('/api/bills/:id', protect, (req, res) => {
+  const uid = getUserId(req);
+  const i = findBillIndex(uid, req.params.id);
+  if (i < 0) return res.status(404).json({ error: 'Not found' });
+  bills.splice(i, 1);
+  res.json({ message: 'Bill deleted successfully' });
+});
+
 app.post('/api/reset', protect, (req, res) => {
-  const uid = req.user._id;
+  const uid = getUserId(req);
   products = products.filter(p => p.userId !== uid);
   bills = bills.filter(b => b.userId !== uid);
   SAMPLE_PRODUCTS.forEach((sp) => {

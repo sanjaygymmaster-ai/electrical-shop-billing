@@ -4,17 +4,34 @@ export default function Products({ products = [], onAdd, onUpdate, onDelete, loa
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', brand: '', price: '', stock: '', category: '' });
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (editing) {
-      await onUpdate(editing._id, form);
+    setError('');
+    setSaving(true);
+    const payload = {
+      ...form,
+      name: form.name.trim(),
+      brand: form.brand.trim(),
+      category: form.category.trim(),
+      price: Number(form.price),
+      stock: Number(form.stock)
+    };
+
+    const result = editing
+      ? await onUpdate(editing._id, payload)
+      : await onAdd(payload);
+
+    if (result?.ok) {
+      setForm({ name: '', brand: '', price: '', stock: '', category: '' });
+      setShowForm(false);
+      setEditing(null);
     } else {
-      await onAdd(form);
+      setError(result?.error || 'Could not save product');
     }
-    setForm({ name: '', brand: '', price: '', stock: '', category: '' });
-    setShowForm(false);
-    setEditing(null);
+    setSaving(false);
   };
 
   const handleEdit = (product) => {
@@ -77,7 +94,8 @@ export default function Products({ products = [], onAdd, onUpdate, onDelete, loa
               className="border p-2 rounded"
             />
           </div>
-          <button type="submit" className="bg-green-600 text-white px-4 py-2 rounded mt-4">
+          {error ? <div className="text-rose-600 text-sm mt-3">{error}</div> : null}
+          <button type="submit" disabled={saving} className="bg-green-600 text-white px-4 py-2 rounded mt-4 disabled:opacity-60">
             {editing ? 'Update' : 'Add'} Product
           </button>
         </form>

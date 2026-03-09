@@ -7,19 +7,21 @@ export default function Bill({ billItems = [], onUpdateQuantity, onCreateBill })
   const [customerName, setCustomerName] = useState('');
   const [paymentType, setPaymentType] = useState('later');
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [message, setMessage] = useState('');
 
   const total = billItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
   const handleCreateBill = () => {
     if (!customerName.trim()) {
-      alert('Please enter customer name');
+      setMessage('Please enter customer name');
       return;
     }
 
     if (billItems.length === 0) {
-      alert('Please add some products to the bill');
+      setMessage('Please add some products to the bill');
       return;
     }
+    setMessage('');
 
     const totalAmount = total;
     const gst = 0;
@@ -153,6 +155,12 @@ export default function Bill({ billItems = [], onUpdateQuantity, onCreateBill })
             <UPIQR amount={total} />
           </div>
         )}
+
+        {message ? (
+          <div className="mb-4 text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+            {message}
+          </div>
+        ) : null}
 
         <div className="flex gap-4 justify-center">
           <button

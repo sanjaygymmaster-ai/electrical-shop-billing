@@ -20,7 +20,7 @@ async function seed() {
     await User.deleteOne({ _id: existing._id });
     console.log('Deleted existing demo user');
   }
-  const user = await User.create({ email: 'demo@demo.com', username: 'demo', name: 'Demo User', password: 'demo123' });
+  const user = await User.create({ email: 'demo@demo.com', username: 'demo', name: 'Demo User', password: 'demo123', role: 'user' });
   console.log('Created demo user: demo@demo.com / demo123 (username: demo)');
   await Product.insertMany(sampleProducts.map(p => ({ ...p, userId: user._id })));
   console.log('Sample products seeded for demo user');

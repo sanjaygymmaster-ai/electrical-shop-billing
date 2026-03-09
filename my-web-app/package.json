@@ -1,0 +1,16 @@
+{
+  "name": "my-web-app",
+  "version": "1.0.0",
+  "description": "A web application with a login page.",
+  "main": "src/scripts/app.js",
+  "scripts": {
+    "start": "live-server src",
+    "build": "echo 'Build process not defined yet.'"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "live-server": "^1.2.1"
+  },
+  "author": "Your Name",
+  "license": "MIT"
+}

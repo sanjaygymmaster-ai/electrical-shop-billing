@@ -81,7 +81,7 @@ export default function Signup() {
         <p className="text-slate-500 text-center text-sm mb-6">Create your account</p>
         {apiPointsToLocalhostOnProd && (
           <div className="mb-4 p-3 bg-amber-50 border-l-4 border-amber-400 text-amber-800 text-sm rounded">
-            Warning: frontend is configured to use the local API (http://localhost). On Netlify this will fail — set <code>VITE_API_URL</code> in Netlify Site → Settings → Build & deploy → Environment to your backend URL (e.g. https://api.example.com/api).
+            Warning: frontend is configured to use the local API (http://localhost). On Netlify this will fail — set <code>VITE_API_URL</code> in Netlify Site → Settings → Build & deploy → Environment to your backend URL (e.g. https://electrical-shop-backend.onrender.com/api).
           </div>
         )}
         <form onSubmit={handleSubmit} className="bg-white p-6 rounded-xl shadow space-y-4">
