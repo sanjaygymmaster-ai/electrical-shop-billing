@@ -16,30 +16,14 @@ app.use(helmet());
 app.use(compression());
 
 // CORS
-const allowedOrigins = [
-  'https://electrical-shop-billing-sanjay.netlify.app',
-  'http://localhost:5173',
-  'http://localhost:3000'
-];
-
-app.use(cors({
-  origin(origin, callback) {
-    // Allow non-browser clients (no Origin header) and allowed web origins.
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error('Not allowed by CORS'));
-  },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors({ origin: '*' }));
 
 // JSON
 app.use(express.json());
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ ok: true }));
-app.get('/', (req, res) => res.json({ message: 'API ok' }));
+app.get('/', (req, res) => res.send('Electrical Shop Backend API is running'));
 
 // Mount routes
 app.use('/api/products', productRoutes);
