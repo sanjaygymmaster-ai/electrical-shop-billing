@@ -1,15 +1,15 @@
 import axios from 'axios';
 
-const DEFAULT_API_BASE_URL = 'https://electrical-shop-backend.onrender.com/api';
+const DEFAULT_BACKEND_ORIGIN = 'https://electrical-shop-backend.onrender.com';
 
-function resolveApiBaseUrl() {
+function resolveBackendOrigin() {
   const envUrl = (import.meta.env.VITE_API_URL || '').trim();
-  const baseUrl = envUrl || DEFAULT_API_BASE_URL;
-  return baseUrl.replace(/\/+$/, '');
+  const origin = envUrl || DEFAULT_BACKEND_ORIGIN;
+  return origin.replace(/\/api\/?$/i, '').replace(/\/+$/, '');
 }
 
-export const API_BASE_URL = resolveApiBaseUrl();
-export const API_ORIGIN = API_BASE_URL.replace(/\/api$/, '');
+export const BACKEND_ORIGIN = resolveBackendOrigin();
+export const API_BASE_URL = `${BACKEND_ORIGIN}/api`;
 
 const API = axios.create({
   baseURL: API_BASE_URL,
