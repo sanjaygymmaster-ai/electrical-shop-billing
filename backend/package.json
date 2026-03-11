@@ -16,6 +16,12 @@
     "google-auth-library": "^10.6.1",
     "helmet": "^7.0.0",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^8.8.0"
+    "mongoose": "^8.8.0",
+    "nodemailer": "^6.9.4",
+    "express-rate-limit": "^6.10.0",
+    "validator": "^13.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }
